@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>达人电商数据看板</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/vue@3.4.0/dist/vue.global.prod.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6fa; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    .grad-blue { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .grad-orange { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+    .grad-green { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+    .grad-pink { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+    .grad-gmv { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+    .grad-teal { background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236B7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px; }
+    .btn-press { transition: transform 0.1s; }
+    .btn-press:active { transform: scale(0.96); }
+    .chart-container { position: relative; width: 100%; }
+    input[type="date"] { color-scheme: light; }
+    /* 顶部筛选栏 */
+    .filter-bar { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .filter-label { font-size: 12px; color: #9ca3af; margin-bottom: 4px; display: block; }
+    .filter-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; border: 1px solid #e5e7eb; background: white; color: #6b7280; }
+    .filter-chip:hover { border-color: #a5b4fc; }
+    .filter-chip.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-color: transparent; }
+    .dim-chip { padding: 5px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; transition: all 0.2s; border: 1px solid #e5e7eb; background: white; color: #6b7280; }
+    .dim-chip:hover { border-color: #a5b4fc; }
+    .dim-chip.active { background: #ede9fe; color: #7c3aed; border-color: #c4b5fd; font-weight: 600; }
+  </style>
+</head><body>
+<div id="app">
+  <!-- ===== 顶部标题栏 ===== -->
+  <header class="bg-white shadow-sm sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">&#x1F4CA;</span>
+        <div>
+          <h1 class="text-lg sm:text-xl font-bold text-gray-800">达人电商数据看板</h1>
+          <p class="text-xs text-gray-400 hidden sm:block">实时监控两个达人团队的广告消耗、佣金和订单数据</p>
+        </div>
+      </div>
+      <select v-model="selectedTeam" @change="onTeamChange"
+              class="bg-purple-50 border border-purple-200 text-purple-700 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-purple-300 outline-none">
+        <option value="TeamA">豫东小老妹 Team</option>
+        <option value="TeamB">豫东高子 Team</option>
+      </select>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+    <!-- ===== 筛选区域 ===== -->
+    <section class="filter-bar mb-4 sm:mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- 账号选择 -->
+        <div>
+          <label class="filter-label">选择账号</label>
+          <select v-model="selectedAccount" @change="updateCharts"
+                  class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none focus:ring-2 focus:ring-purple-300 transition">
+            <option value="all">整个 Team 汇总</option>
+            <option v-for="acc in currentAccounts" :value="acc">{{ acc }}</option>
+          </select>
+        </div>
+        <!-- 时间快捷选择 -->
+        <div>
+          <label class="filter-label">时间范围</label>
+          <div class="filter-group">
+            <button v-for="opt in timeQuickOptions" :key="opt.value"
+                    @click="selectTimeRange(opt.value)"
+                    :class="['btn-press filter-chip', timeMode === opt.value ? 'active' : '']">
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+        <!-- 时间维度 -->
+        <div>
+          <label class="filter-label">时间维度</label>
+          <div class="filter-group">
+            <button v-for="dim in timeDimensions" :key="dim.value"
+                    @click="timeDimension = dim.value; updateCharts()"
+                    :class="['btn-press dim-chip', timeDimension === dim.value ? 'active' : '']">
+              {{ dim.label }}
+            </button>
+          </div>
+        </div>
+        <!-- 自定义日期 -->
+        <div v-if="timeMode === 'custom'" class="lg:col-span-1">
+          <label class="filter-label">自定义日期</label>
+          <div class="flex gap-2">
+            <input type="date" v-model="customStart" @change="updateCharts"
+                   class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-2 py-2 text-xs outline-none focus:ring-2 focus:ring-purple-300">
+            <input type="date" v-model="customEnd" @change="updateCharts"
+                   class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-2 py-2 text-xs outline-none focus:ring-2 focus:ring-purple-300">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== KPI 指标卡片 ===== -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+      <!-- GMV 大卡�� -->
+      <div class="md:col-span-2 grad-gmv rounded-2xl p-5 sm:p-6 text-white shadow-lg">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm opacity-90">总成交金额 GMV</p>
+            <p class="text-3xl sm:text-4xl font-bold mt-2">{{ formatNumber(filteredMetrics.totalGmv) }}</p>
+            <p class="text-xs opacity-75 mt-1">元</p>
+          </div>
+          <span class="text-4xl opacity-30">&#x1F4B0;</span>
+        </div>
+      </div>
+      <!-- 广告消耗 -->
+      <div class="grad-blue rounded-2xl p-4 sm:p-5 text-white shadow-md">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs opacity-80">广告消耗</p>
+            <p class="text-xl sm:text-2xl font-bold mt-1">{{ formatNumber(filteredMetrics.totalCost) }}</p>
+          </div>
+          <span class="text-2xl opacity-30">&#x1F4B2;</span>
+        </div>
+        <p class="text-xs opacity-60 mt-2">元</p>
+      </div>
+      <!-- 预估佣金 -->
+      <div class="grad-orange rounded-2xl p-4 sm:p-5 text-white shadow-md">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs opacity-80">预估佣金</p>
+            <p class="text-xl sm:text-2xl font-bold mt-1">{{ formatNumber(filteredMetrics.totalCommission) }}</p>
+          </div>
+          <span class="text-2xl opacity-30">&#x1F4E6;</span>
+        </div>
+        <p class="text-xs opacity-60 mt-2">元</p>
+      </div>
+    </section>
+
+    <!-- ===== 第二行：图表 + 订单明细 ===== -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
+      <!-- 左侧：环形图 -->
+      <div class="lg:col-span-1 bg-white rounded-2xl p-4 sm:p-5 shadow-sm">
+        <h3 class="font-bold text-base mb-4 flex items-center gap-2">
+          <span>&#x1F4C8;</span> 账号 GMV 占比
+        </h3>
+        <div class="chart-container" style="max-height: 220px;">
+          <canvas ref="donutChartRef"></canvas>
+        </div>
+        <div class="mt-4 space-y-2">
+          <div v-for="(item, idx) in donutLegend" :key="idx" class="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full" :style="{ backgroundColor: item.color }"></span>
+              <span class="text-gray-700 text-xs">{{ item.name }}</span>
+            </div>
+            <div class="text-right">
+              <span class="font-semibold text-gray-800 text-xs">{{ item.percent }}%</span>
+              <span class="text-xs text-gray-400 ml-1">({{ formatNumber(item.value) }})</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 中间：折线图 -->
+      <div class="lg:col-span-2 bg-white rounded-2xl p-4 sm:p-5 shadow-sm">
+        <h3 class="font-bold text-base mb-4 flex items-center gap-2">
+          <span>&#x1F4C9;</span> 消耗 &amp; 佣金趋势
+        </h3>
+        <div class="chart-container" style="height: 280px;">
+          <canvas ref="lineChartRef"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 第三行：订单明细 + 账号对比 ===== -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
+      <!-- 订单明细 -->
+      <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-bold text-base flex items-center gap-2"><span>&#x1F6D2;</span> 商品订单明细</h3>
+          <span class="text-xs text-gray-400">Top {{ orderDetails.length }}</span>
+        </div>
+        <div class="space-y-2">
+          <div v-for="(item, idx) in orderDetails" :key="idx"
+               class="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition cursor-pointer">
+            <span :class="['w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0',
+                           idx === 0 ? 'grad-blue' : idx === 1 ? 'grad-orange' : idx === 2 ? 'grad-green' : 'bg-gray-300']">
+              {{ idx + 1 }}
+            </span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-gray-800 truncate">{{ item.productName }}</span>
+                <span v-if="item.tag" :class="['text-xs px-2 py-0.5 rounded-full font-medium', tagClass(item.tag)]">{{ item.tag }}</span>
+              </div>
+              <p class="text-xs text-gray-400 mt-0.5">ID: {{ item.productId }}</p>
+            </div>
+            <div class="text-right flex-shrink-0">
+              <p class="text-sm font-bold text-gray-800">{{ formatNumber(item.amount) }}</p>
+              <p class="text-xs text-gray-400">{{ item.orderCount }} 单</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 账号对比 -->
+      <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm">
+        <h3 class="font-bold text-base mb-4 flex items-center gap-2"><span>&#x1F4CB;</span> 账号数据对比</h3>
+        <div class="space-y-4">
+          <div v-for="ad in accountComparison" :key="ad.name" class="p-4 rounded-xl bg-gray-50">
+            <div class="flex items-center justify-between mb-3">
+              <span class="font-semibold text-sm text-gray-800">{{ ad.name }}</span>
+              <span class="text-sm font-bold text-purple-600">{{ formatNumber(ad.gmv) }} 元</span>
+            </div>
+            <!-- GMV 进度条 -->
+            <div class="mb-3">
+              <div class="flex justify-between text-xs text-gray-500 mb-1">
+                <span>GMV 贡献</span>
+                <span>{{ (ad.barWidth).toFixed(0) }}%</span>
+              </div>
+              <div class="w-full bg-gray-200 rounded-full h-2.5">
+                <div class="h-2.5 rounded-full transition-all duration-500" :style="{ width: ad.barWidth + '%', backgroundColor: ad.color }"></div>
+              </div>
+            </div>
+            <!-- 消耗和佣金 -->
+            <div class="grid grid-cols-2 gap-3">
+              <div class="bg-white rounded-lg p-2 text-center">
+                <p class="text-xs text-gray-400">广告消耗</p>
+                <p class="text-sm font-bold text-gray-700 mt-0.5">{{ formatNumber(ad.cost) }}</p>
+              </div>
+              <div class="bg-white rounded-lg p-2 text-center">
+                <p class="text-xs text-gray-400">预估佣金</p>
+                <p class="text-sm font-bold text-gray-700 mt-0.5">{{ formatNumber(ad.commission) }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 底部信息 ===== -->
+    <footer class="text-center py-4 text-xs text-gray-400">
+      <p>数据更新于 {{ currentDate }} · 模拟数据仅供演示</p>
+      <p class="mt-1">达人电商数据看板 v2.0</p>
+    </footer>
+  </main>
+</div><script>
+const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+createApp({ setup() {
+  // === 生成最近N天的日期 ===
+  function generateDates(days) {
+    const dates = [];
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    return dates;
+  }
+  let seed = 42;
+  function rand(min, max) {
+    seed = (seed * 16807) % 2147483647;
+    return Math.floor(min + (seed / 2147483647) * (max - min));
+  }
+  function generateDailyMetrics(accounts, dates) {
+    const data = [];
+    accounts.forEach(acc => {
+      const bc = (acc === '周浩' || acc === '高') ? 2000 : 1500;
+      dates.forEach(date => {
+        const cost = rand(bc, bc + 1500);
+        const commission = Math.round(cost * (0.3 + rand(0, 30) / 100));
+        const gmv = Math.round(cost * (8 + rand(0, 50) / 10));
+        const orders = Math.max(1, Math.round(gmv / (rand(80, 150))));
+        data.push({ date, account: acc, cost, commission, gmv, orders });
+      });
+    });
+    return data;
+  }
+  const products = [
+    { name: '夏季透气运动鞋', pid: 'SP001', tag: '爆款' },
+    { name: '纯棉休闲T恤', pid: 'SP002', tag: '爆款' },
+    { name: '女士防晒外套', pid: 'SP003', tag: '新品' },
+    { name: '儿童益智玩具', pid: 'SP004', tag: '引流' },
+    { name: '厨房收纳套装', pid: 'SP005', tag: '' },
+    { name: '男士皮带钱包套装', pid: 'SP006', tag: '爆款' },
+    { name: '网红零食大礼包', pid: 'SP007', tag: '引流' },
+    { name: '家用空气净化器', pid: 'SP008', tag: '新品' },
+    { name: '运动健身手环', pid: 'SP009', tag: '' },
+    { name: '秋冬保暖内衣', pid: 'SP010', tag: '预售' },
+  ];
+  function generateOrderDetails(accounts, dates) {
+    const details = [];
+    dates.slice(-7).forEach(date => {
+      accounts.forEach(acc => {
+        const count = rand(2, 5);
+        const used = new Set();
+        for (let i = 0; i < count; i++) {
+          let idx; do { idx = rand(0, products.length - 1); } while (used.has(idx));
+          used.add(idx);
+          const p = products[idx];
+          const oc = rand(5, 80);
+          details.push({ date, account: acc, productName: p.name, productId: p.pid, orderCount: oc, amount: oc * rand(29, 299), tag: p.tag });
+        }
+      });
+    });
+    return details;
+  }
+  const allDates = generateDates(30);
+  const teamAAccounts = ['周浩', '豫东小老妹', '小周周'];
+  const teamADaily = generateDailyMetrics(teamAAccounts, allDates);
+  const teamAOrders = generateOrderDetails(teamAAccounts, allDates);
+  const teamBAccounts = ['高', '高高白喝了', '钢蹦爸爸（豫东小老弟）'];
+  const teamBDaily = generateDailyMetrics(teamBAccounts, allDates);
+  const teamBOrders = generateOrderDetails(teamBAccounts, allDates);
+  const selectedTeam = ref('TeamA');
+  const selectedAccount = ref('all');
+  const timeMode = ref('last7');
+  const timeDimension = ref('day');
+  const customStart = ref('');
+  const customEnd = ref('');
+  const currentDate = ref(new Date().toLocaleString('zh-CN'));
+  const donutChartRef = ref(null);
+  const lineChartRef = ref(null);
+  let donutChartInstance = null;
+  let lineChartInstance = null;
+  const timeQuickOptions = [
+    { label: '昨天', value: 'yesterday' },
+    { label: '最近7天', value: 'last7' },
+    { label: '最近30天', value: 'last30' },
+    { label: '自定义', value: 'custom' },
+  ];
+  const timeDimensions = [
+    { label: '按天', value: 'day' },
+    { label: '按周', value: 'week' },
+    { label: '按月', value: 'month' },
+  ];
+  const chartColors = ['#FFB3BA', '#BAFFC9', '#BAE1FF', '#FFFFBA', '#E8BAFF', '#FFD4BA'];
+  // === 计算属性 ===
+  const currentAccounts = computed(() => selectedTeam.value === 'TeamA' ? teamAAccounts : teamBAccounts);
+  const currentDailyData = computed(() => selectedTeam.value === 'TeamA' ? teamADaily : teamBDaily);
+  const currentOrderData = computed(() => selectedTeam.value === 'TeamA' ? teamAOrders : teamBOrders);
+  function getFilteredDates() {
+    switch (timeMode.value) {
+      case 'yesterday': return [allDates[allDates.length - 2]];
+      case 'last7': return allDates.slice(-7);
+      case 'last30': return [...allDates];
+      case 'custom':
+        if (customStart.value && customEnd.value) return allDates.filter(d => d >= customStart.value && d <= customEnd.value);
+        return allDates.slice(-7);
+      default: return allDates.slice(-7);
+    }
+  }
+  const filteredMetrics = computed(() => {
+    const dates = getFilteredDates();
+    let data = currentDailyData.value.filter(d => dates.includes(d.date));
+    if (selectedAccount.value !== 'all') data = data.filter(d => d.account === selectedAccount.value);
+    return { totalCost: data.reduce((s, d) => s + d.cost, 0), totalCommission: data.reduce((s, d) => s + d.commission, 0), totalGmv: data.reduce((s, d) => s + d.gmv, 0), totalOrders: data.reduce((s, d) => s + d.orders, 0), rawData: data };
+  });
+  const orderDetails = computed(() => {
+    const dates = getFilteredDates();
+    let data = currentOrderData.value.filter(d => dates.includes(d.date));
+    if (selectedAccount.value !== 'all') data = data.filter(d => d.account === selectedAccount.value);
+    const agg = {};
+    data.forEach(d => { const k = d.productName + '|' + d.productId; if (!agg[k]) agg[k] = { ...d, orderCount: 0, amount: 0 }; agg[k].orderCount += d.orderCount; agg[k].amount += d.amount; });
+    return Object.values(agg).sort((a, b) => b.amount - a.amount).slice(0, 10);
+  });
+  const donutLegend = computed(() => {
+    const dates = getFilteredDates();
+    let data = currentDailyData.value.filter(d => dates.includes(d.date));
+    if (selectedAccount.value !== 'all') data = data.filter(d => d.account === selectedAccount.value);
+    const ba = {}; data.forEach(d => { ba[d.account] = (ba[d.account] || 0) + d.gmv; });
+    const entries = Object.entries(ba); const total = entries.reduce((s, [, v]) => s + v, 0);
+    return entries.map(([name, value], i) => ({ name, value, percent: total > 0 ? ((value / total) * 100).toFixed(1) : '0.0', color: chartColors[i % chartColors.length] }));
+  });
+  const accountComparison = computed(() => {
+    const dates = getFilteredDates();
+    let data = currentDailyData.value.filter(d => dates.includes(d.date));
+    if (selectedAccount.value !== 'all') data = data.filter(d => d.account === selectedAccount.value);
+    const ba = {};
+    data.forEach(d => { if (!ba[d.account]) ba[d.account] = { cost: 0, commission: 0, gmv: 0 }; ba[d.account].cost += d.cost; ba[d.account].commission += d.commission; ba[d.account].gmv += d.gmv; });
+    const entries = Object.entries(ba); const maxGmv = Math.max(...entries.map(([, v]) => v.gmv));
+    const colors = ['#667eea', '#f093fb', '#43e97b'];
+    return entries.map(([name, val], i) => ({ name, cost: val.cost, commission: val.commission, gmv: val.gmv, barWidth: maxGmv > 0 ? (val.gmv / maxGmv * 100) : 0, color: colors[i % colors.length] }));
+  });
+  // 工具函数
+  function formatNumber(n) { if (n >= 10000) return (n / 10000).toFixed(1) + 'w'; if (n >= 1000) return (n / 1000).toFixed(1) + 'k'; return n.toLocaleString(); }
+  function tagClass(tag) { const m = { '爆款': 'bg-red-100 text-red-600', '新品': 'bg-blue-100 text-blue-600', '引流': 'bg-green-100 text-green-600', '预售': 'bg-purple-100 text-purple-600' }; return m[tag] || 'bg-gray-100 text-gray-500'; }
+  // === 折线图更新 ===
+  function updateLineChart() {
+    const dates = getFilteredDates();
+    let labels = [], costData = [], commissionData = [];
+    if (timeDimension.value === 'day') {
+      labels = dates;
+      dates.forEach(date => {
+        const dd = filteredMetrics.value.rawData.filter(d => d.date === date);
+        costData.push(dd.reduce((s, d) => s + d.cost, 0));
+        commissionData.push(dd.reduce((s, d) => s + d.commission, 0));
+      });
+    } else if (timeDimension.value === 'week') {
+      const weeks = {};
+      dates.forEach(date => {
+        const d = new Date(date); const dow = d.getDay();
+        const monday = new Date(d); monday.setDate(d.getDate() - dow + (dow === 0 ? -6 : 1));
+        const wk = monday.toISOString().split('T')[0];
+        if (!weeks[wk]) weeks[wk] = { cost: 0, commission: 0, label: '' };
+        const dd = filteredMetrics.value.rawData.filter(x => x.date === date);
+        weeks[wk].cost += dd.reduce((s, x) => s + x.cost, 0);
+        weeks[wk].commission += dd.reduce((s, x) => s + x.commission, 0);
+        weeks[wk].label = wk;
+      });
+      labels = Object.values(weeks).map(w => w.label);
+      costData = Object.values(weeks).map(w => w.cost);
+      commissionData = Object.values(weeks).map(w => w.commission);
+    } else if (timeDimension.value === 'month') {
+      const months = {};
+      dates.forEach(date => {
+        const mk = date.substring(0, 7);
+        if (!months[mk]) months[mk] = { cost: 0, commission: 0, label: '' };
+        const dd = filteredMetrics.value.rawData.filter(x => x.date === date);
+        months[mk].cost += dd.reduce((s, x) => s + x.cost, 0);
+        months[mk].commission += dd.reduce((s, x) => s + x.commission, 0);
+        months[mk].label = mk;
+      });
+      labels = Object.values(months).map(m => m.label);
+      costData = Object.values(months).map(m => m.cost);
+      commissionData = Object.values(months).map(m => m.commission);
+    }
+    const ctx = lineChartRef.value.getContext('2d');
+    if (lineChartInstance) lineChartInstance.destroy();
+    const gc = ctx.createLinearGradient(0, 0, 0, 280);
+    gc.addColorStop(0, 'rgba(102,126,234,0.25)'); gc.addColorStop(1, 'rgba(102,126,234,0.0)');
+    const gm = ctx.createLinearGradient(0, 0, 0, 280);
+    gm.addColorStop(0, 'rgba(240,147,251,0.25)'); gm.addColorStop(1, 'rgba(240,147,251,0.0)');
+    lineChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [
+        { label: '广告消耗', data: costData, borderColor: '#667eea', backgroundColor: gc, borderWidth: 2.5, tension: 0.4, fill: true, pointRadius: 3, pointHoverRadius: 6, pointBackgroundColor: '#667eea' },
+        { label: '预估佣金', data: commissionData, borderColor: '#f093fb', backgroundColor: gm, borderWidth: 2.5, tension: 0.4, fill: true, pointRadius: 3, pointHoverRadius: 6, pointBackgroundColor: '#f093fb' }
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top', labels: { usePointStyle: true, padding: 15, font: { size: 11 } } },
+          tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 12 }, bodyFont: { size: 12 }, padding: 10, cornerRadius: 8, callbacks: { label: c => ' ' + c.dataset.label + ': \u00A5' + c.parsed.y.toLocaleString() } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 45 } },
+          y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, callback: v => formatNumber(v) }, border: { display: false } }
+        },
+        interaction: { mode: 'index', intersect: false }
+      }
+    });
+  }
+  // === 环形图更新 ===
+  function updateDonutChart() {
+    if (donutChartInstance) donutChartInstance.destroy();
+    const ctx = donutChartRef.value.getContext('2d');
+    const legend = donutLegend.value;
+    let labels, values, colors;
+    if (selectedAccount.value !== 'all' && legend.length === 1) {
+      labels = [legend[0].name]; values = [100]; colors = [legend[0].color];
+    } else {
+      labels = legend.map(l => l.name); values = legend.map(l => parseFloat(l.percent)); colors = legend.map(l => l.color);
+    }
+    donutChartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, hoverOffset: 8 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', padding: 10, cornerRadius: 8, callbacks: { label: c => ' ' + c.label + ': ' + c.parsed + '%' } }
+        }
+      },
+      plugins: [{
+        id: 'centerText',
+        beforeDraw(chart) {
+          const { ctx: c } = chart; c.restore();
+          const total = legend.reduce((s, l) => s + l.value, 0);
+          c.font = 'bold 16px -apple-system'; c.fillStyle = '#374151';
+          c.textAlign = 'center'; c.textBaseline = 'middle';
+          const cx = (chart.chartArea.left + chart.chartArea.right) / 2;
+          const cy = (chart.chartArea.top + chart.chartArea.bottom) / 2;
+          c.fillText(formatNumber(total), cx, cy - 8);
+          c.font = '11px -apple-system'; c.fillStyle = '#9CA3AF';
+          c.fillText('\u603B GMV', cx, cy + 12);
+          c.save();
+        }
+      }]
+    });
+  }
+  function updateCharts() { nextTick(() => { updateDonutChart(); updateLineChart(); }); }
+  function onTeamChange() { selectedAccount.value = 'all'; updateCharts(); }
+  function selectTimeRange(mode) {
+    timeMode.value = mode;
+    if (mode === 'custom') {
+      const today = new Date(); const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+      customEnd.value = today.toISOString().split('T')[0]; customStart.value = weekAgo.toISOString().split('T')[0];
+    }
+    updateCharts();
+  }
+  onMounted(() => {
+    const today = new Date(); const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+    customEnd.value = today.toISOString().split('T')[0]; customStart.value = weekAgo.toISOString().split('T')[0];
+    updateCharts();
+  });
+  watch([selectedAccount, timeMode, customStart, customEnd], () => updateCharts());
+  watch(selectedTeam, () => { selectedAccount.value = 'all'; updateCharts(); });
+  return { selectedTeam, selectedAccount, timeMode, timeDimension, customStart, customEnd, currentDate, timeQuickOptions, timeDimensions, currentAccounts, filteredMetrics, orderDetails, donutLegend, accountComparison, donutChartRef, lineChartRef, formatNumber, tagClass, onTeamChange, selectTimeRange, updateCharts };
+}}).mount('#app');</script>
+</body>
+</html>
