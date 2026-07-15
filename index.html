@@ -320,7 +320,7 @@
   .m-team-name{font-size:14px;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38vw;}
   .m-team-switch{font-size:12px;color:#2563eb;background:#eef4ff;padding:3px 9px;border-radius:999px;flex:none;}
   .m-date{flex:none;display:flex;align-items:center;gap:5px;font-size:13px;color:#475569;background:#f1f5f9;padding:6px 12px;border-radius:999px;max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .m-main{flex:1;padding:14px 14px 86px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .m-main{flex:1;padding:14px 14px 28px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
   .m-section{display:flex;flex-direction:column;gap:14px;}
   .m-kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
   .m-kpi{position:relative;background:#fff;border:1px solid #eef1f6;border-radius:14px;padding:12px 12px 12px 14px;overflow:hidden;}
@@ -363,10 +363,7 @@
   .m-sync-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .m-switch{display:flex;align-items:center;gap:6px;font-size:13px;color:#475569;}
   .m-sync-status{margin-top:8px;font-size:12px;color:#6b7280;min-height:16px;}
-  .m-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;background:#fff;border-top:1px solid #eef1f6;padding:6px 0 calc(6px + env(safe-area-inset-bottom));}
-  .m-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;border:none;background:none;padding:6px 0;font-size:12px;color:#9aa3b2;}
-  .m-tab.m-tab-active{color:#2563eb;font-weight:700;}
-  .m-tab.m-tab-active::after{content:'';display:block;width:22px;height:3px;border-radius:3px;background:#2563eb;margin-top:3px;}
+  .m-sec-title{font-size:15px;font-weight:700;color:#1f2937;margin:6px 2px 0;padding-left:10px;border-left:3px solid #2563eb;}
 
   </style>
 </head>
@@ -680,7 +677,8 @@
     </header>
 
     <main class="m-main">
-      <section v-if="mobileTab==='overview'" class="m-section">
+      <!-- 概览 -->
+      <div class="m-section">
         <div class="m-kpi-grid">
           <div v-for="k in kpis" :key="k.key" class="m-kpi" :class="k.grad">
             <span class="m-kpi-dot"></span>
@@ -706,9 +704,11 @@
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <section v-else-if="mobileTab==='compare'" class="m-section">
+      <!-- 账号对比 -->
+      <div class="m-section">
+        <div class="m-sec-title">账号对比</div>
         <div v-for="ad in accountComparison" :key="ad.name" class="m-acc-card">
           <div class="m-acc-head"><span class="m-acc-name">{{ ad.name }}</span></div>
           <div class="m-acc-stats">
@@ -718,11 +718,12 @@
             <div class="m-acc-stat"><div class="m-acc-label">投产比 ROI</div><div class="m-acc-val">{{ ad.roi.toFixed(2) }}</div></div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <section v-else class="m-section">
+      <!-- 数据明细 & 同步 -->
+      <div class="m-section">
+        <div class="m-sec-title">数据明细（商品 Top10）</div>
         <div class="m-card">
-          <div class="m-card-title">数据明细（商品 Top10）</div>
           <div class="m-table-wrap">
             <table class="m-table">
               <thead><tr><th>日期</th><th>账号</th><th>消耗</th><th>佣金</th><th>GMV</th><th>订单</th></tr></thead>
@@ -746,14 +747,8 @@
           </div>
           <div class="m-sync-status">{{ syncStatus }}</div>
         </div>
-      </section>
+      </div>
     </main>
-
-    <nav class="m-tabbar">
-      <button class="m-tab" :class="{'m-tab-active':mobileTab==='overview'}" @click="switchMobileTab('overview')">概览</button>
-      <button class="m-tab" :class="{'m-tab-active':mobileTab==='compare'}" @click="switchMobileTab('compare')">账号对比</button>
-      <button class="m-tab" :class="{'m-tab-active':mobileTab==='more'}" @click="switchMobileTab('more')">更多</button>
-    </nav>
   </div>
 
   <!-- 管理员入口：默认对外隐藏；仅右下角低调齿轮可触发，带 ?admin=1 时顶部显示正式按钮 -->
@@ -952,14 +947,12 @@ createApp({
   let mDonutInstance=null, mLineInstance=null;
 
   const isMobile=ref(typeof window!=='undefined' && window.matchMedia && window.matchMedia('(max-width:768px)').matches);
-  const mobileTab=ref('overview');
   const dateLabel=computed(()=>{
     if(timeMode.value==='custom') return customStart.value+' ～ '+customEnd.value;
     const o=timeQuickOptions.find(t=>t.value===timeMode.value);
     return o?o.label:'全部';
   });
   function toggleTeam(){ selectedTeam.value = selectedTeam.value==='TeamA'?'TeamB':'TeamA'; onTeamChange(); }
-  function switchMobileTab(tab){ mobileTab.value=tab; if(tab==='overview') nextTick(()=>updateCharts()); }
 
   const timeQuickOptions=[
     {label:'昨天',value:'yesterday'},
@@ -1604,7 +1597,7 @@ createApp({
     openPicker,pickerView,pickerDays,openCalendar,closePicker,movePicker,isRangeSel,isRangeIn,selectRangeDate,
     timeQuickOptions,accountOptions,importTeamOptions,currentAccounts,filteredMetrics,orderDetails,donutLegend,accountComparison,kpis,
     importedCount,importedAtText,donutChartRef,lineChartRef,
-    isMobile,mobileTab,dateLabel,toggleTeam,switchMobileTab,mLineRef,mDonutRef,
+    isMobile,dateLabel,toggleTeam,mLineRef,mDonutRef,
     formatNumber,formatMoney,tagClass,copyId,openProduct,onTeamChange,selectTimeRange,updateCharts,
     showAdminBar,showImport,importTab,importTeam,manualTeamAccounts,manualRows,importImageName,importImagePreview,dailyFileName,ordersFileName,importError,toastMsg,
     openImport,closeImport,onDailyFile,onOrdersFile,doImport,resetToMock,downloadTemplate,addManualRow,removeManualRow,doManualImport,onImageFile,recognizeImage,
