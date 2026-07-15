@@ -224,6 +224,13 @@
     .ocr-raw{margin-top:10px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;font-size:12px;}
     .ocr-raw summary{cursor:pointer;padding:8px 12px;color:#475569;user-select:none;font-weight:600;}
     .ocr-raw pre{margin:0;padding:0 12px 12px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.5;color:#1e293b;}
+    .ocr-result{margin-top:14px;border:1px solid var(--border);border-top:3px solid var(--accent,#2563eb);border-radius:12px;background:#fff;padding:12px 14px;box-shadow:0 4px 14px rgba(37,99,235,.08);}
+    .ocr-result-head{display:flex;align-items:center;justify-content:space-between;font-weight:700;color:#0f172a;font-size:14px;}
+    .ocr-result-head .m-del{margin-left:auto;}
+    .ocr-result-team{font-size:12px;color:#475569;margin:6px 0 10px;}
+    .ocr-result-team b{color:var(--accent,#2563eb);}
+    .ocr-result-actions{display:flex;gap:10px;margin-top:12px;}
+    .ocr-result-actions .btn-primary{flex:1;}
     .ref-img{margin-top:12px;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:#f8fafc;}
     .ref-img-label{display:block;font-size:11px;color:#94a3b8;padding:6px 10px 0;}
     .ref-img img{display:block;width:100%;max-height:200px;object-fit:contain;}
@@ -577,13 +584,37 @@
             <div class="file-name" v-if="importImageName">✓ {{ importImageName }}</div>
           </div>
           <input type="file" accept="image/*" ref="imgInput" style="display:none" @change="onImageFile">
-          <div v-if="importImagePreview" class="img-preview">
+          <div v-if="importImagePreview && !ocrResult" class="img-preview">
             <img :src="importImagePreview" alt="预览">
           </div>
-          <button class="btn-primary block" v-if="importImagePreview" :disabled="ocrBusy" @click="recognizeImage">{{ ocrMsg || '🔍 开始识别' }}</button>
-          <details class="ocr-raw" v-if="ocrText"><summary>识别原文（可核对 / 复制）</summary><pre>{{ ocrText }}</pre></details>
-          <div class="img-note">已接入 <b>纯前端 OCR（Tesseract.js）</b>，无需 API Key、不上传服务器：点「开始识别」即从截图中提取 消耗 / 佣金 / GMV / 订单数 并预填到录入表单；识别后请核对，必要时点下方「对照手动填写」手动修正。</div>
-          <button class="btn-ghost block" v-if="importImagePreview" @click="importTab='manual'">✏️ 对照手动填写（保留截图）</button>
+          <button class="btn-primary block" v-if="importImagePreview && !ocrResult" :disabled="ocrBusy" @click="recognizeImage">{{ ocrMsg || '🔍 开始识别' }}</button>
+
+          <!-- 识别结果：直接核对并确认，无需再手动填写 -->
+          <div v-if="ocrResult" class="ocr-result">
+            <div class="ocr-result-head">
+              <span>✅ 识别结果（请核对，有误可直接改）</span>
+              <button class="m-del" @click="ocrResult=null" title="放弃">✕</button>
+            </div>
+            <div class="ocr-result-team">导入到：<b>{{ ocrResult.team==='TeamA' ? '小老妹 Team' : '豫东高子 Team' }}</b></div>
+            <div class="manual-table">
+              <div class="manual-head"><span>日期</span><span>广告消耗</span><span>预估佣金</span><span>GMV</span><span>订单数</span></div>
+              <div class="manual-row">
+                <input class="m-input" type="date" v-model="ocrResult.date">
+                <input class="m-input" v-model="ocrResult.cost" inputmode="decimal" placeholder="0">
+                <input class="m-input" v-model="ocrResult.commission" inputmode="decimal" placeholder="0">
+                <input class="m-input" v-model="ocrResult.gmv" inputmode="decimal" placeholder="0">
+                <input class="m-input" v-model="ocrResult.orders" inputmode="numeric" placeholder="0">
+              </div>
+            </div>
+            <details class="ocr-raw" v-if="ocrText"><summary>识别原文（可核对）</summary><pre>{{ ocrText }}</pre></details>
+            <div class="ocr-result-actions">
+              <button class="btn-ghost" @click="recognizeImage" :disabled="ocrBusy">↻ 重新识别</button>
+              <button class="btn-primary" @click="confirmOcrImport">✓ 确认录入</button>
+            </div>
+          </div>
+
+          <div class="img-note">纯前端 OCR（Tesseract.js）自动识别，识别后<b>直接在此核对并点「确认录入」</b>即可入库，无需再去手动填写。若识别不到，可点下方「✏️ 手动填写」兜底。</div>
+          <button class="btn-ghost block" v-if="!ocrResult" @click="importTab='manual'">✏️ 手动填写（OCR 识别不到时兜底）</button>
         </div>
 
         <div class="modal-backup">
@@ -1226,7 +1257,7 @@ createApp({
   resetManualRows();
   watch(importTeam,()=>resetManualRows());
   const importImageName=ref(''); const importImagePreview=ref(''); const importImageFile=ref(null);
-  const ocrBusy=ref(false); const ocrMsg=ref(''); const ocrText=ref('');
+  const ocrBusy=ref(false); const ocrMsg=ref(''); const ocrText=ref(''); const ocrResult=ref(null);
   let toastTimer=null;
   function toast(msg){ toastMsg.value=msg; if(toastTimer) clearTimeout(toastTimer); toastTimer=setTimeout(()=>{toastMsg.value='';},2600); }
   function openImport(){ importError.value=''; dailyFileName.value=dailyFile.value?dailyFileName.value:''; showImport.value=true; }
@@ -1315,15 +1346,31 @@ createApp({
     out.orders=_numAfterLabel(norm,['成交订单数','支付订单数','订单数','订单量']);
     return out;
   }
-  function fillFromOcr(p){
-    if(!manualRows.value.length) resetManualRows();
-    const row=manualRows.value[0];
-    if(p.date) row.date=p.date;
-    if(p.cost) row.cost=p.cost;
-    if(p.commission) row.commission=p.commission;
-    if(p.gmv) row.gmv=p.gmv;
-    if(p.orders) row.orders=p.orders;
-    manualRows.value=[...manualRows.value];
+  // 确认录入：把识别到的单日数据合并进该团队（同日覆盖、不同日追加，不清历史）
+  function confirmOcrImport(){
+    const r=ocrResult.value; if(!r) return;
+    if(!r.date){ importError.value='请先补全日期'; return; }
+    const day={
+      date:r.date,
+      account:'图片识别',
+      cost:parseNum(r.cost), commission:parseNum(r.commission),
+      gmv:parseNum(r.gmv), orders:Math.round(parseNum(r.orders))
+    };
+    if(!day.cost && !day.commission && !day.gmv && !day.orders){ importError.value='请至少填写一个数值（消耗/佣金/GMV/订单数）'; return; }
+    const team=r.team;
+    const imp=importedData.value[team];
+    const daily=imp?imp.daily.map(d=>({...d})):[];
+    const idx=daily.findIndex(d=>d.date===day.date);
+    if(idx>=0) daily[idx]=day; else daily.push(day);
+    daily.sort((a,b)=>a.date<b.date?-1:(a.date>b.date?1:0));
+    const orders=deriveOrders(daily);
+    importedData.value={...importedData.value,[team]:{daily,orders,importedAt:new Date()}};
+    selectedTeam.value=team; selectedAccount.value='all';
+    updateCharts();
+    toast('✓ 已录入 '+(team==='TeamA'?'小老妹 Team':'豫东高子 Team')+' '+day.date+' 的数据');
+    // 复位识别态
+    ocrResult.value=null; ocrText.value='';
+    importImagePreview.value=''; importImageName.value=''; importImageFile.value=null;
   }
   async function recognizeImage(){
     if(!importImageFile.value){ importError.value='请先上传截图'; return; }
@@ -1339,10 +1386,9 @@ createApp({
       ocrText.value=(ret.data&&ret.data.text)||'';
       const parsed=parseOcrText(ocrText.value);
       const got=parsed.cost||parsed.commission||parsed.gmv||parsed.orders||parsed.date;
-      if(!got){ importError.value='未识别到投放数据，请确认截图含 消耗/佣金/GMV/订单数，或改用「对照手动填写」'; return; }
-      fillFromOcr(parsed);
-      importTab.value='manual';
-      toast('识别完成，已预填到录入表单，请核对后点击「录入」');
+      if(!got){ importError.value='未识别到投放数据，请确认截图含 消耗/佣金/GMV/订单数，或改用「对照手动填写」'; ocrBusy.value=false; ocrMsg.value=''; return; }
+      ocrResult.value={ team:importTeam.value, date:parsed.date, cost:parsed.cost, commission:parsed.commission, gmv:parsed.gmv, orders:parsed.orders };
+      toast('识别完成，请核对下方结果后点「确认录入」');
     }catch(e){ importError.value=(e&&e.message)||'识别失败'; }
     finally{ ocrBusy.value=false; ocrMsg.value=''; }
   }
@@ -1481,8 +1527,8 @@ createApp({
     importedCount,importedAtText,donutChartRef,lineChartRef,
 
     formatNumber,formatMoney,tagClass,copyId,openProduct,onTeamChange,selectTimeRange,updateCharts,
-    showAdminBar,showImport,importTab,importTeam,manualTeamAccounts,manualRows,importImageName,importImagePreview,dailyFileName,ordersFileName,importError,toastMsg,ocrBusy,ocrMsg,ocrText,
-    openImport,closeImport,onDailyFile,onOrdersFile,doImport,resetToMock,downloadTemplate,addManualRow,removeManualRow,doManualImport,onImageFile,recognizeImage,
+    showAdminBar,showImport,importTab,importTeam,manualTeamAccounts,manualRows,importImageName,importImagePreview,dailyFileName,ordersFileName,importError,toastMsg,ocrBusy,ocrMsg,ocrText,ocrResult,
+    openImport,closeImport,onDailyFile,onOrdersFile,doImport,resetToMock,downloadTemplate,addManualRow,removeManualRow,doManualImport,onImageFile,recognizeImage,confirmOcrImport,
     exportData,onImportData,importDataFile,exportDataJs,syncToRepo,syncStatus,repoSync,saveRepoSync,
   };
 }}).mount('#app');
