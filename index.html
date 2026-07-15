@@ -469,13 +469,13 @@
         <div v-for="ad in accountComparison" :key="ad.name" class="acc-card">
           <div class="acc-head">
             <span class="acc-name">{{ ad.name }}</span>
-            <span class="acc-gmv">{{ formatNumber(ad.commission) }} 元</span>
+            <span class="acc-gmv">{{ formatMoney(ad.commission) }} 元</span>
           </div>
           <div class="acc-label"><span>佣金贡献</span><span>{{ ad.barWidth.toFixed(0) }}%</span></div>
           <div class="acc-bar"><div class="acc-fill" :style="{width:ad.barWidth+'%',backgroundColor:ad.color}"></div></div>
           <div class="acc-stats">
-            <div class="stat"><div class="stat-label">广告消耗</div><div class="stat-val">{{ formatNumber(ad.cost) }}</div></div>
-            <div class="stat"><div class="stat-label">预估佣金</div><div class="stat-val">{{ formatNumber(ad.commission) }}</div></div>
+            <div class="stat"><div class="stat-label">广告消耗</div><div class="stat-val">{{ formatMoney(ad.cost) }}</div></div>
+            <div class="stat"><div class="stat-label">预估佣金</div><div class="stat-val">{{ formatMoney(ad.commission) }}</div></div>
             <div class="stat"><div class="stat-label">佣金ROI</div><div class="stat-val">{{ ad.roi.toFixed(2) }}</div></div>
           </div>
         </div>
@@ -485,7 +485,7 @@
     <footer class="footer">
       <p v-if="importedCount">数据导入于 {{ importedAtText }} · 共 {{ importedCount }} 条投放记录</p>
       <p v-else>数据更新于 {{ currentDate }} · 模拟数据仅供演示</p>
-      <p>达人电商数据看板 v3.1</p>
+      <p>达人电商数据看板 v3.2</p>
     </footer>
   </main>
 
@@ -590,6 +590,7 @@
             <div class="sync-row">
               <input class="m-input" type="password" v-model="repoSync.token" @input="saveRepoSync" placeholder="GitHub Token（仅存本机，不随页面发布）">
             </div>
+            <div class="sync-status" style="color:#64748b;">经典令牌需勾选 repo 权限；细粒度令牌需对该仓库单独开启 Contents 读写权限</div>
             <div class="sync-row sync-2col">
               <input class="m-input" v-model="repoSync.repo" @input="saveRepoSync" placeholder="仓库 owner/repo">
               <input class="m-input" v-model="repoSync.branch" @input="saveRepoSync" placeholder="分支" style="max-width:84px">
@@ -889,8 +890,8 @@ createApp({
     const cur=computeMetrics(getFilteredDates());
     const prev=computeMetrics(getPreviousDates());
     const cfg=[
-      {key:'cost',label:'广告消耗',grad:'grad-blue',betterUp:false,fmt:v=>formatNumber(v),raw:cur.cost},
-      {key:'commission',label:'预估佣金',grad:'grad-green',betterUp:true,fmt:v=>formatNumber(v),raw:cur.commission},
+      {key:'cost',label:'广告消耗',grad:'grad-blue',betterUp:false,fmt:v=>formatMoney(v),raw:cur.cost},
+      {key:'commission',label:'预估佣金',grad:'grad-green',betterUp:true,fmt:v=>formatMoney(v),raw:cur.commission},
       {key:'gmv',label:'总成交金额 GMV',grad:'grad-sky',betterUp:true,fmt:v=>formatNumber(v),raw:cur.gmv},
       {key:'roi',label:'投产比 ROI',grad:'grad-amber',betterUp:true,fmt:v=>v.toFixed(2),raw:cur.roi},
       {key:'aov',label:'客单价',grad:'grad-teal',betterUp:true,fmt:v=>formatNumber(v),raw:cur.aov},
@@ -936,6 +937,11 @@ createApp({
     if(n>=1e8) return (n/1e8).toFixed(2)+'亿';
     if(n>=1e4) return (n/1e4).toFixed(1)+'w';
     return Math.round(n).toLocaleString('zh-CN');
+  }
+  // 纯数字 + 固定两位小数（用于广告消耗 / 预估佣金等金额指标）
+  function formatMoney(n){
+    const v=Number(n)||0;
+    return v.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
   }
   function formatCurrency(n){ return (n<0?'-':'')+formatNumber(Math.abs(n)); }
   function tagClass(tag){
@@ -1325,19 +1331,41 @@ createApp({
     const content='/* 达人看板真实数据 — 自动同步生成，请勿手动编辑 */\nwindow.__DASHBOARD_DATA__ = '+payload+';\n';
     let b64;
     try{ b64=btoa(unescape(encodeURIComponent(content))); }catch(e){ syncStatus.value='编码失败：'+(e.message||e); return; }
-    const repo=encodeURIComponent(repoSync.repo.trim());
-    const api='https://api.github.com/repos/'+repo+'/contents/data.js';
+    const repo=repoSync.repo.trim();
+    const branch=repoSync.branch.trim()||'main';
+    const api='https://api.github.com/repos/'+encodeURIComponent(repo)+'/contents/data.js';
     const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
     syncStatus.value='同步中…';
-    fetch(api+'?ref='+encodeURIComponent(repoSync.branch.trim()),{headers})
-      .then(r=> r.ok ? r.json() : null)
+    // 1) 先取 sha（文件不存在时 404 属正常，视为「新建」）
+    fetch(api+'?ref='+encodeURIComponent(branch),{headers})
+      .then(r=>{
+        if(r.ok) return r.json();
+        if(r.status===404) return null;
+        return r.json().then(j=>({__err:true,status:r.status,msg:j&&j.message})).catch(()=>({__err:true,status:r.status}));
+      })
       .then(meta=>{
-        const body={message:'chore: 自动同步达人看板数据 '+new Date().toLocaleString('zh-CN'),content:b64,branch:repoSync.branch.trim()};
+        if(meta&&meta.__err){
+          // 读取失败（多为 token 无效/无权限）：私有仓库在鉴权失败时会返回 404
+          throw new Error('无法读取仓库文件（HTTP '+(meta.status||'')+(meta.msg?': '+meta.msg:'')+'）');
+        }
+        const body={message:'chore: 自动同步达人看板数据 '+new Date().toLocaleString('zh-CN'),content:b64,branch};
         if(meta&&meta.sha) body.sha=meta.sha;
         return fetch(api,{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify(body)});
       })
-      .then(r=>{ if(r.ok) return r.json(); return r.json().then(e=>{throw new Error(e.message||('HTTP '+r.status));}); })
-      .then(()=>{ syncStatus.value='✅ 已同步到仓库（'+new Date().toLocaleTimeString('zh-CN')+'）'; })
+      .then(r=>{
+        if(r.ok) return null;
+        return r.json().then(j=>({status:r.status,msg:j&&j.message})).catch(()=>({status:r.status}));
+      })
+      .then(err=>{
+        if(!err){ syncStatus.value='✅ 已同步到仓库（'+new Date().toLocaleTimeString('zh-CN')+'）'; return; }
+        const hint=(err.status===401)?'Token 无效或已失效，请重新生成':
+                   (err.status===403)?'Token 权限不足：经典令牌需 repo 权限；细粒度令牌需对该仓库开启 Contents 读写':
+                   (err.status===404)?'仓库或分支不存在，请检查 owner/repo 与分支名是否与仓库一致':
+                   (err.status===409)?'并发冲突，请稍后重试即可':
+                   (err.status===422)?('请求被拒：'+(err.msg||'数据格式异常')):
+                   (err.msg?err.msg:'网络/浏览器拦截，请检查网络或跨域限制');
+        syncStatus.value='同步失败 ['+err.status+']：'+hint;
+      })
       .catch(e=>{ syncStatus.value='同步失败：'+(e.message||e); });
   }
   function downloadTemplate(which){
